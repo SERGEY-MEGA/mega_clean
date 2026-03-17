@@ -24,6 +24,8 @@
 	<string>11.0</string>
 	<key>LSUIElement</key>
 	<true/>
+	<key>NSAppleEventsUsageDescription</key>
+	<string>Нужно разрешение, чтобы через Finder очищать корзину и удалять файлы безопасно.</string>
 	<key>NSHighResolutionCapable</key>
 	<true/>
 </dict>

@@ -143,7 +143,11 @@ class StorageManager: ObservableObject {
             DispatchQueue.main.async {
                 self.isCleaning = false
                 if result.failedCount > 0 {
-                    self.lastActionStatus = "Корзина: очищено \(Self.formatBytes(result.deletedBytes)), осталось \(result.failedCount)"
+                    if let err = result.lastError, !err.isEmpty {
+                        self.lastActionStatus = "Корзина: не всё удалилось (\(result.failedCount)). Нужны разрешения Finder."
+                    } else {
+                        self.lastActionStatus = "Корзина: очищено \(Self.formatBytes(result.deletedBytes)), осталось \(result.failedCount)"
+                    }
                 } else {
                     self.lastActionStatus = "Корзина очищена: \(Self.formatBytes(result.deletedBytes))"
                 }
@@ -190,9 +194,15 @@ class StorageManager: ObservableObject {
     private struct TrashReport {
         let deletedBytes: Int64
         let failedCount: Int
+        let lastError: String?
     }
 
     private func emptyTrashWithReport(trashPath: String) -> TrashReport {
+        // 1) Сначала попросим Finder очистить корзину (он умеет чистить корзины со всех дисков).
+        // Это может показать системный запрос “разрешить управление Finder”.
+        let finderResult = runAppleScriptWithError(#"tell application "Finder" to empty the trash"#)
+
+        // 2) Дополнительно пытаемся вручную удалить пользовательскую корзину.
         do {
             let items = try fileManager.contentsOfDirectory(atPath: trashPath)
             var deleted: Int64 = 0
@@ -209,25 +219,29 @@ class StorageManager: ObservableObject {
                 }
             }
 
-            // Если что-то осталось — попробуем “родной” Finder empty trash (может запросить доступ).
-            if failed > 0 {
-                _ = runAppleScript(#"tell application "Finder" to empty the trash"#)
-                let remaining = (try? fileManager.contentsOfDirectory(atPath: trashPath).count) ?? failed
-                return TrashReport(deletedBytes: deleted, failedCount: remaining)
-            }
-
-            return TrashReport(deletedBytes: deleted, failedCount: 0)
+            let remaining = (try? fileManager.contentsOfDirectory(atPath: trashPath).count) ?? failed
+            return TrashReport(deletedBytes: deleted, failedCount: remaining, lastError: finderResult.errorMessage)
         } catch {
-            return TrashReport(deletedBytes: 0, failedCount: 0)
+            // Если даже список не читается — почти наверняка упёрлись в разрешения.
+            return TrashReport(deletedBytes: 0, failedCount: 1, lastError: finderResult.errorMessage ?? error.localizedDescription)
         }
     }
 
-    @discardableResult
-    private func runAppleScript(_ source: String) -> Bool {
+    private struct AppleScriptResult {
+        let ok: Bool
+        let errorMessage: String?
+    }
+
+    private func runAppleScriptWithError(_ source: String) -> AppleScriptResult {
         let appleScript = NSAppleScript(source: source)
         var error: NSDictionary?
         _ = appleScript?.executeAndReturnError(&error)
-        return (error == nil)
+        if let error {
+            // Typical: -1743 (not authorized to send Apple events)
+            let msg = error[NSAppleScript.errorMessage] as? String
+            return AppleScriptResult(ok: false, errorMessage: msg ?? "\(error)")
+        }
+        return AppleScriptResult(ok: true, errorMessage: nil)
     }
 
     @discardableResult

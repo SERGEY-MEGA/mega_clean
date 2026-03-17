@@ -88,9 +88,9 @@ struct MenuView: View {
                 ProgressView()
                     .scaleEffect(0.6)
             } else {
-                Image(systemName: "sparkles")
-                    .foregroundColor(.yellow)
-                    .font(.title2)
+                Text("\(Int(storageManager.freeSpacePercentage))%")
+                    .font(.system(size: 18, weight: .bold, design: .rounded))
+                    .foregroundColor(statusColor)
             }
         }
     }

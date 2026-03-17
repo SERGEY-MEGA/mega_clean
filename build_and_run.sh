@@ -33,6 +33,7 @@ cp "./Resources/MiniIcon.icns" "$MINI_BUNDLE/Contents/Resources/MiniIcon.icns"
 swiftc -o "$MAIN_BUNDLE/Contents/MacOS/$APP_MAIN_NAME" \
     SystemMonitorManager.swift \
     StorageManager.swift \
+    CleanerScanManager.swift \
     SharedUI.swift \
     MainWindowView.swift \
     MegaCleanerMainApp.swift \

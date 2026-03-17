@@ -40,8 +40,17 @@ class StorageManager: ObservableObject {
         lastActionStatus = "Очистка кэша приложений…"
 
         let cachesPath = NSString(string: "~/Library/Caches").expandingTildeInPath
+        // Консервативные исключения: оставляем системное и “чувствительные” приложения,
+        // чтобы не ломать авторизацию/профили и не получать неожиданное поведение.
         let excludePrefixes = [
-            "com.apple.", // не трогаем apple caches (минимум рисков)
+            "com.apple.",
+            "com.google.Chrome",
+            "com.apple.Safari",
+            "com.microsoft",
+            "org.mozilla.firefox",
+            "com.apple.mail",
+            "com.apple.Photos",
+            "com.apple.iCloud",
         ]
 
         DispatchQueue.global(qos: .userInitiated).async {
@@ -124,16 +133,20 @@ class StorageManager: ObservableObject {
     
     func emptyTrash() {
         isCleaning = true
-        lastActionStatus = "Очистка корзины..."
+        lastActionStatus = "Очистка корзины…"
         
         let trashPath = NSString(string: "~/.Trash").expandingTildeInPath
         
         DispatchQueue.global(qos: .userInitiated).async {
-            let deleted = self.removeItems(at: trashPath, keepDirectory: true)
+            let result = self.emptyTrashWithReport(trashPath: trashPath)
             
             DispatchQueue.main.async {
                 self.isCleaning = false
-                self.lastActionStatus = "Корзина очищена: \(Self.formatBytes(deleted))"
+                if result.failedCount > 0 {
+                    self.lastActionStatus = "Корзина: очищено \(Self.formatBytes(result.deletedBytes)), осталось \(result.failedCount)"
+                } else {
+                    self.lastActionStatus = "Корзина очищена: \(Self.formatBytes(result.deletedBytes))"
+                }
                 self.updateFreeSpace()
                 self.clearStatusAfterDelay()
             }
@@ -172,6 +185,49 @@ class StorageManager: ObservableObject {
             print("Не удалось удалить \(path): \(error)")
             return 0
         }
+    }
+
+    private struct TrashReport {
+        let deletedBytes: Int64
+        let failedCount: Int
+    }
+
+    private func emptyTrashWithReport(trashPath: String) -> TrashReport {
+        do {
+            let items = try fileManager.contentsOfDirectory(atPath: trashPath)
+            var deleted: Int64 = 0
+            var failed = 0
+
+            for item in items {
+                let itemPath = (trashPath as NSString).appendingPathComponent(item)
+                deleted += Self.directorySize(atPath: itemPath)
+                do {
+                    try fileManager.removeItem(atPath: itemPath)
+                } catch {
+                    // Если файл защищён/занят — не ломаемся, просто считаем как “осталось”.
+                    failed += 1
+                }
+            }
+
+            // Если что-то осталось — попробуем “родной” Finder empty trash (может запросить доступ).
+            if failed > 0 {
+                _ = runAppleScript(#"tell application "Finder" to empty the trash"#)
+                let remaining = (try? fileManager.contentsOfDirectory(atPath: trashPath).count) ?? failed
+                return TrashReport(deletedBytes: deleted, failedCount: remaining)
+            }
+
+            return TrashReport(deletedBytes: deleted, failedCount: 0)
+        } catch {
+            return TrashReport(deletedBytes: 0, failedCount: 0)
+        }
+    }
+
+    @discardableResult
+    private func runAppleScript(_ source: String) -> Bool {
+        let appleScript = NSAppleScript(source: source)
+        var error: NSDictionary?
+        _ = appleScript?.executeAndReturnError(&error)
+        return (error == nil)
     }
 
     @discardableResult
